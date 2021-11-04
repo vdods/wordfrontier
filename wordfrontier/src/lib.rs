@@ -3,7 +3,7 @@ mod error;
 
 pub use crate::{
     corpus_db::{
-        CorpusDb, KnownWordWithText, Lang, Order, Range, SentenceMembershipWithTextEtc, SentenceRow,
+        CorpusDb, KnownWordWithText, Lang, OnConflict, Order, Range, SentenceMembershipWithTextEtc, SentenceRow,
         TranslationWithText, WordFrontierMember,
     },
     error::Error,

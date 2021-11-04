@@ -28,11 +28,6 @@ pub struct LangRow {
     pub long: String,
 }
 
-// pub struct Sentence {
-//     pub lang_rowid: i32,
-//     pub text: String,
-// }
-
 #[derive(Debug)]
 pub struct SentenceRow {
     pub sentences_rowid: i32,
@@ -232,6 +227,29 @@ impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for KnownWordWithText {
     }
 }
 
+/// See https://www.sqlite.org/lang_conflict.html -- note that OnConflict::Fail is the
+/// default behavior if no "ON XXX" is specified in the INSERT SQL statement.
+#[derive(Debug, Clone, Copy)]
+pub enum OnConflict {
+    Abort,
+    Fail,
+    Ignore,
+    Replace,
+    Rollback,
+}
+
+impl std::fmt::Display for OnConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+            OnConflict::Abort => write!(f, "ABORT"),
+            OnConflict::Fail => write!(f, "FAIL"),
+            OnConflict::Ignore => write!(f, "IGNORE"),
+            OnConflict::Replace => write!(f, "REPLACE"),
+            OnConflict::Rollback => write!(f, "ROLLBACK"),
+        }
+    }
+}
+
 pub struct CorpusDb {
     conn: rusqlite::Connection,
 }
@@ -298,13 +316,14 @@ impl CorpusDb {
         target_lang: Lang,
         reference_lang: Lang,
         sentence_pairs_tsv_p: impl AsRef<Path>,
+        on_conflict: OnConflict,
     ) -> Result<()> {
         let tx = self.conn.transaction()?;
 
-        // Ensure target and reference Lang-s are inserted.
+        // Ensure target and reference Lang-s are inserted.  Always ignore conflicts.
         {
             let mut insert_lang_stmt = tx.prepare(
-                "INSERT INTO langs (short, long) VALUES (?1, ?2) ON CONFLICT(short) DO NOTHING",
+                &format!("INSERT OR {} INTO langs (short, long) VALUES (?1, ?2)", OnConflict::Ignore)
             )?;
             insert_lang_stmt.execute(rusqlite::params![target_lang.short, target_lang.long])?;
             insert_lang_stmt
@@ -326,7 +345,9 @@ impl CorpusDb {
         // Although not anywhere close to a single Chrome browser tab...
         // Also record all the translations during this pass, so no intermediate storage is needed.
         let sentence_row_v = {
-            let mut insert_translation = tx.prepare("INSERT INTO translations (target_lang_sentence_rowid, reference_lang_sentence_rowid) VALUES (?1, ?2)")?;
+            let mut insert_translation = tx.prepare(
+                &format!("INSERT OR {} INTO translations (target_lang_sentence_rowid, reference_lang_sentence_rowid) VALUES (?1, ?2)", on_conflict)
+            )?;
 
             log::info!("importing from path {:?}", sentence_pairs_tsv_p.as_ref());
             // First, determine the number of lines in the file.
@@ -456,7 +477,9 @@ impl CorpusDb {
         // Insert sentences
         {
             // Prepare an SQL statement ahead of time to avoid its preparation overhead inside the loop.
-            let mut insert_sentence = tx.prepare("INSERT INTO sentences (sentences_rowid, lang_rowid, text) VALUES (?1, ?2, ?3) ON CONFLICT DO NOTHING")?;
+            let mut insert_sentence = tx.prepare(
+                &format!("INSERT OR {} INTO sentences (sentences_rowid, lang_rowid, text) VALUES (?1, ?2, ?3)", on_conflict)
+            )?;
             for sentence_row in sentence_row_v.iter() {
                 // TODO: Figure out how to do this more cleanly, e.g. with some From trait
                 insert_sentence.execute(rusqlite::params![
@@ -470,7 +493,7 @@ impl CorpusDb {
         // Insert words
         {
             let mut insert_word = tx.prepare(
-                "INSERT INTO words (words_rowid, lang_rowid, text, freq) VALUES (?1, ?2, ?3, ?4)",
+                &format!("INSERT OR {} INTO words (words_rowid, lang_rowid, text, freq) VALUES (?1, ?2, ?3, ?4)", on_conflict),
             )?;
             for word_row in word_row_m.values() {
                 // TODO: Figure out how to do this more cleanly, e.g. with a From trait
@@ -486,7 +509,7 @@ impl CorpusDb {
         // Insert sentence memberships
         {
             let mut insert_sentence_membership = tx.prepare(
-                "INSERT INTO sentence_memberships (sentence_rowid, word_rowid) VALUES (?1, ?2)",
+                &format!("INSERT OR {} INTO sentence_memberships (sentence_rowid, word_rowid) VALUES (?1, ?2)", on_conflict),
             )?;
             for (sentence_rowid, word_rowid_s) in sentence_membership_sm.iter() {
                 for word_rowid in word_rowid_s.iter() {
@@ -535,12 +558,12 @@ impl CorpusDb {
         let mut stmt = self.conn.prepare("
             -- Human-friendly query of sentence_memberships
             SELECT
-			    sentence_memberships.sentence_memberships_rowid,
-				sentence_memberships.sentence_rowid,
-				sentence_memberships.word_rowid,
-				words.text,
-				words.freq,
-				(sentence_memberships.word_rowid IN (SELECT known_words.word_rowid FROM known_words))
+                sentence_memberships.sentence_memberships_rowid,
+                sentence_memberships.sentence_rowid,
+                sentence_memberships.word_rowid,
+                words.text,
+                words.freq,
+                (sentence_memberships.word_rowid IN (SELECT known_words.word_rowid FROM known_words))
             FROM sentence_memberships
             INNER JOIN words ON words.words_rowid = sentence_memberships.word_rowid
             WHERE sentence_memberships.sentence_rowid = ?1
@@ -610,14 +633,20 @@ impl CorpusDb {
             SELECT sentences.sentences_rowid, sentences.lang_rowid, sentences.text, (
                 SELECT COUNT(*)
                 FROM sentence_memberships
-                WHERE sentence_memberships.sentence_rowid = sentences.sentences_rowid AND sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
+                WHERE
+                    sentence_memberships.sentence_rowid = sentences.sentences_rowid
+                    AND
+                    sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
                 GROUP BY sentence_memberships.sentence_rowid
                 ORDER BY sentence_memberships.sentence_rowid
             ), (
                 SELECT MIN(words.freq)
                 FROM sentence_memberships
                 INNER JOIN words ON words.words_rowid = sentence_memberships.word_rowid
-                WHERE sentence_memberships.sentence_rowid = sentences.sentences_rowid AND sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
+                WHERE
+                    sentence_memberships.sentence_rowid = sentences.sentences_rowid
+                    AND
+                    sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
                 GROUP BY sentence_memberships.sentence_rowid
                 ORDER BY sentence_memberships.sentence_rowid
             ) as unknown_word_freq
@@ -625,7 +654,10 @@ impl CorpusDb {
             WHERE (
                 SELECT COUNT(*)
                 FROM sentence_memberships
-                WHERE sentence_memberships.sentence_rowid = sentences.sentences_rowid AND sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
+                WHERE
+                    sentence_memberships.sentence_rowid = sentences.sentences_rowid
+                    AND
+                    sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
                 GROUP BY sentence_memberships.sentence_rowid
                 ORDER BY sentence_memberships.sentence_rowid
             ) BETWEEN ?1 AND ?2
@@ -663,7 +695,10 @@ impl CorpusDb {
             WHERE (
                 SELECT COUNT(*)
                 FROM sentence_memberships
-                WHERE S1.sentences_rowid = sentence_rowid AND word_rowid NOT IN (SELECT known_words_rowid FROM known_words)
+                WHERE
+                    S1.sentences_rowid = sentence_rowid
+                    AND
+                    word_rowid NOT IN (SELECT known_words_rowid FROM known_words)
                 GROUP BY sentence_rowid
                 ORDER BY sentence_rowid
             ) BETWEEN ?1 AND ?2

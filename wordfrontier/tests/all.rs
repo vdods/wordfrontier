@@ -1,4 +1,4 @@
-use wordfrontier::{CorpusDb, Order, Range, Result};
+use wordfrontier::{CorpusDb, OnConflict, Order, Range, Result};
 
 // use wordfrontier::Lang;
 //
@@ -18,6 +18,7 @@ use wordfrontier::{CorpusDb, Order, Range, Result};
 //         },
 //         // "downloads/Sentence pairs in German-English - 2021-08-29.short.tsv",
 //         "downloads/Sentence pairs in German-English - 2021-08-29.tsv",
+//         OnConflict::Ignore,
 //     )?;
 //     Ok(())
 // }
