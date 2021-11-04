@@ -1,6 +1,6 @@
 .PHONY: build
 build:
-	cargo test --no-run 2>&1 | sed 's/ *--> \(.*\)/\1: error:/g'
+	cargo test --no-run 2>&1 | sed 's/ *--> wordfrontier\/\(.*\)/\1: error:/g'
 
 .PHONY: test
 test:
