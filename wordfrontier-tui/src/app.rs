@@ -37,9 +37,13 @@ impl<'a> App<'a> {
         self.word_frontier = StatefulList::with_items(
             self.corpus_db
                 .query_word_frontier_v(wordfrontier::Range(1, 1), 1, wordfrontier::Order::Descending).expect("blahh") // TEMP HACK HARDCODED
+//                 .query_word_frontier_v(wordfrontier::Range(2, 2), 1, wordfrontier::Order::Descending).expect("blahh") // TEMP HACK HARDCODED
         );
         // Set the cursor to the 0th element.
         self.word_frontier.next();
+        // Reset the cursor for sentence memberships to the 0th element.
+        self.sentence_memberships.state.select(None);
+        self.sentence_memberships.next();
     }
 
     fn update_translations(&mut self) {
@@ -55,6 +59,7 @@ impl<'a> App<'a> {
     }
 
     fn update_sentence_membership(&mut self) {
+        let previous_selection = self.sentence_memberships.state.selected();
         self.sentence_memberships = if let Some(selected_index) = self.word_frontier.state.selected() {
             let sentence_row = &self.word_frontier.items[selected_index];
             StatefulList::with_items(
@@ -64,8 +69,15 @@ impl<'a> App<'a> {
         } else {
             StatefulList::new()
         };
-        // Set the cursor to the 0th element.
-        self.sentence_memberships.next();
+        match previous_selection {
+            Some(i) => {
+                self.sentence_memberships.state.select(Some(i));
+            },
+            None => {
+                // Set the cursor to the 0th element.
+                self.sentence_memberships.next();
+            },
+        };
     }
 
     fn update_known_words(&mut self) {
