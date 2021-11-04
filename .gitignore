@@ -1,0 +1,7 @@
+Cargo.lock
+target
+*.db
+*.sqbpro
+.kdev4
+*.kdev4
+attic

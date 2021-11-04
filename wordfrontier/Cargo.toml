@@ -1,0 +1,15 @@
+[package]
+name = "wordfrontier"
+version = "0.0.0"
+authors = ["Victor Dods <victor.dods@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4.14"
+rusqlite = { version = "0.25.3", features = ["bundled"] }
+thiserror = "1.0.26"
+
+[dev-dependencies]
+env_logger = "0.8.4"

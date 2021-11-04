@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "wordfrontier",
+    "wordfrontier-tui",
+]
