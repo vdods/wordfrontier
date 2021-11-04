@@ -8,7 +8,6 @@ pub use crate::{
     stateful_list::StatefulList,
     tabs_state::TabsState,
 };
-use argh::FromArgs;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event as CEvent, KeyCode},
     execute,
@@ -19,29 +18,15 @@ use std::{
     io::stdout,
     sync::mpsc,
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tui::{backend::CrosstermBackend, Terminal};
 
 enum Event<I> {
     Input(I),
-    Tick,
-}
-
-/// Crossterm demo
-#[derive(Debug, FromArgs)]
-struct Cli {
-    /// time in ms between two ticks.
-    #[argh(option, default = "1000000000")]
-    tick_rate: u64,
-    /// whether unicode symbols are used to improve the overall look of the app
-    #[argh(option, default = "true")]
-    enhanced_graphics: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let cli: Cli = argh::from_env();
-
     enable_raw_mode()?;
 
     let mut stdout = stdout();
@@ -54,22 +39,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Setup input handling
     let (tx, rx) = mpsc::channel();
 
-    let tick_rate = Duration::from_millis(cli.tick_rate);
+    // Effectively have no timeout.
+    let event_poll_timeout = Duration::from_secs(1_000_000_000);
     thread::spawn(move || {
-        let mut last_tick = Instant::now();
         loop {
-            // poll for tick rate duration, if no events, sent tick event.
-            let timeout = tick_rate
-                .checked_sub(last_tick.elapsed())
-                .unwrap_or_else(|| Duration::from_secs(0));
-            if event::poll(timeout).unwrap() {
+            if event::poll(event_poll_timeout).unwrap() {
                 if let CEvent::Key(key) = event::read().unwrap() {
                     tx.send(Event::Input(key)).unwrap();
                 }
-            }
-            if last_tick.elapsed() >= tick_rate {
-                tx.send(Event::Tick).unwrap();
-                last_tick = Instant::now();
             }
         }
     });
@@ -103,9 +80,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 KeyCode::F(5) => app.on_reload(),
                 _ => {}
             },
-            Event::Tick => {
-//                 app.on_tick();
-            }
         }
         if app.should_quit {
             break;
