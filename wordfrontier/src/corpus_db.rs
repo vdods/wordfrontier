@@ -563,10 +563,11 @@ impl CorpusDb {
                 sentence_memberships.word_rowid,
                 words.text,
                 words.freq,
-                (sentence_memberships.word_rowid IN (SELECT known_words.word_rowid FROM known_words))
+                (sentence_memberships.word_rowid IN (SELECT known_words.word_rowid FROM known_words)) AS word_is_known
             FROM sentence_memberships
             INNER JOIN words ON words.words_rowid = sentence_memberships.word_rowid
             WHERE sentence_memberships.sentence_rowid = ?1
+            ORDER BY word_is_known ASC
         ")?;
         let sentence_membership_with_text_etc_v = stmt
             .query_map(
@@ -630,39 +631,45 @@ impl CorpusDb {
         };
         let mut stmt = self.conn.prepare(&format!("
             -- This selects sentence_rowid for sentences having a number of unknown words in a certain range.
-            SELECT sentences.sentences_rowid, sentences.lang_rowid, sentences.text, (
-                SELECT COUNT(*)
-                FROM sentence_memberships
-                WHERE
-                    sentence_memberships.sentence_rowid = sentences.sentences_rowid
-                    AND
-                    sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
-                GROUP BY sentence_memberships.sentence_rowid
-                ORDER BY sentence_memberships.sentence_rowid
-            ), (
-                SELECT MIN(words.freq)
-                FROM sentence_memberships
-                INNER JOIN words ON words.words_rowid = sentence_memberships.word_rowid
-                WHERE
-                    sentence_memberships.sentence_rowid = sentences.sentences_rowid
-                    AND
-                    sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
-                GROUP BY sentence_memberships.sentence_rowid
-                ORDER BY sentence_memberships.sentence_rowid
-            ) as unknown_word_freq
+            SELECT
+                sentences.sentences_rowid,
+                sentences.lang_rowid,
+                sentences.text,
+                (
+                    SELECT COUNT(*)
+                    FROM sentence_memberships
+                    WHERE
+                        sentence_memberships.sentence_rowid = sentences.sentences_rowid
+                        AND
+                        sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
+                    GROUP BY sentence_memberships.sentence_rowid
+                    ORDER BY sentence_memberships.sentence_rowid
+                ),
+                (
+                    SELECT MIN(words.freq)
+                    FROM sentence_memberships
+                    INNER JOIN words ON words.words_rowid = sentence_memberships.word_rowid
+                    WHERE
+                        sentence_memberships.sentence_rowid = sentences.sentences_rowid
+                        AND
+                        sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
+                    GROUP BY sentence_memberships.sentence_rowid
+                    ORDER BY sentence_memberships.sentence_rowid
+                ) as unknown_word_freq
             FROM sentences
-            WHERE (
-                SELECT COUNT(*)
-                FROM sentence_memberships
-                WHERE
-                    sentence_memberships.sentence_rowid = sentences.sentences_rowid
-                    AND
-                    sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
-                GROUP BY sentence_memberships.sentence_rowid
-                ORDER BY sentence_memberships.sentence_rowid
-            ) BETWEEN ?1 AND ?2
-            AND
-            sentences.lang_rowid = ?3
+            WHERE
+                (
+                    SELECT COUNT(*)
+                    FROM sentence_memberships
+                    WHERE
+                        sentence_memberships.sentence_rowid = sentences.sentences_rowid
+                        AND
+                        sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
+                    GROUP BY sentence_memberships.sentence_rowid
+                    ORDER BY sentence_memberships.sentence_rowid
+                ) BETWEEN ?1 AND ?2
+                AND
+                sentences.lang_rowid = ?3
             -- GROUP BY sentences.sentences_rowid
             {}
         ", ordering_str))?;
@@ -678,47 +685,5 @@ impl CorpusDb {
             .map(|word_frontier_member_r| word_frontier_member_r.unwrap())
             .collect();
         Ok(word_frontier_member_v)
-    }
-    pub fn query_word_frontier_with_translation_v(
-        &self,
-        known_word_count_range: Range,
-        target_lang_rowid: i32,
-        reference_lang_rowid: i32,
-    ) -> Result<Vec<WordFrontierWithTranslation>> {
-        let mut stmt = self.conn.prepare("
-            -- This selects sentence_rowid for sentences having a number of unknown words in a certain range,
-            -- and joins the translations of those sentences
-            SELECT S1.sentences_rowid, S1.text, reference_lang_sentence_rowid, S2.text
-            FROM sentences AS S1
-            INNER JOIN translations ON translations.target_lang_sentence_rowid = S1.sentences_rowid
-            INNER JOIN sentences AS S2 ON translations.reference_lang_sentence_rowid = S2.sentences_rowid
-            WHERE (
-                SELECT COUNT(*)
-                FROM sentence_memberships
-                WHERE
-                    S1.sentences_rowid = sentence_rowid
-                    AND
-                    word_rowid NOT IN (SELECT known_words_rowid FROM known_words)
-                GROUP BY sentence_rowid
-                ORDER BY sentence_rowid
-            ) BETWEEN ?1 AND ?2
-            AND
-            S1.lang_rowid = ?3
-            AND
-            S2.lang_rowid = ?4
-        ")?;
-        let sentence_row_v = stmt
-            .query_map(
-                rusqlite::params![
-                    known_word_count_range.0,
-                    known_word_count_range.1,
-                    target_lang_rowid,
-                    reference_lang_rowid
-                ],
-                |row| WordFrontierWithTranslation::try_from(row),
-            )?
-            .map(|word_frontier_with_translation_r| word_frontier_with_translation_r.unwrap())
-            .collect();
-        Ok(sentence_row_v)
     }
 }
