@@ -1,10 +1,12 @@
 mod app;
+mod config;
 mod stateful_list;
 mod tabs_state;
 pub mod ui;
 
 pub use crate::{
     app::App,
+    config::Config,
     stateful_list::StatefulList,
     tabs_state::TabsState,
 };
@@ -26,14 +28,26 @@ enum Event<I> {
     Input(I),
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::init();
+
+    // Load the app config
+    let config: Config = argh::from_env();
+    let db_hub_config = wordfrontier::DbHubConfig::new(
+        &config.target_lang_short_name,
+        &config.reference_lang_short_name,
+        Some("http://localhost:7000".into()),
+    )?;
+    wordfrontier::DbHub::create_and_populate_missing_databases(&db_hub_config).await?;
+    let db_hub = wordfrontier::DbHub::from_config(db_hub_config)?;
+
     enable_raw_mode()?;
 
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
     let backend = CrosstermBackend::new(stdout);
-
     let mut terminal = Terminal::new(backend)?;
 
     // Setup input handling
@@ -51,16 +65,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    let enhanced_graphics = true;
-    let mut app = App::new(" Word Frontier ", enhanced_graphics);
+    let mut app = App::new(config, db_hub);
 
     terminal.clear()?;
 
     loop {
         terminal.draw(|f| ui::draw(f, &mut app))?;
         match rx.recv()? {
+            // TODO: Just forward KeyCode to App
             Event::Input(event) => match event.code {
                 KeyCode::Char('q') => {
+                    // TODO: Handle this stuff in an outer function so that it's guaranteed
+                    // to run even in the case of an error or panic.
                     disable_raw_mode()?;
                     execute!(
                         terminal.backend_mut(),
@@ -71,6 +87,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     break;
                 }
                 KeyCode::Char(c) => app.on_key(c),
+                KeyCode::Enter => app.on_enter(),
+                KeyCode::Backspace => app.on_backspace(),
                 KeyCode::Left => app.on_left(),
                 KeyCode::Up => app.on_up(),
                 KeyCode::Right => app.on_right(),

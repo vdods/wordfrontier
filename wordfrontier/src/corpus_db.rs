@@ -1,32 +1,9 @@
-use crate::Result;
+use crate::{LANG_M, LangRow, OnConflict, Result};
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
-    io::BufRead,
     path::Path,
-    str::FromStr,
 };
-
-#[derive(Debug)]
-pub enum Order {
-    Ascending,
-    Descending,
-    Unordered,
-}
-
-// TODO: Use appropriate type with trait with comparison operators
-pub struct Range(pub i32, pub i32);
-
-pub struct Lang {
-    pub short: String,
-    pub long: String,
-}
-
-pub struct LangRow {
-    pub langs_rowid: i32,
-    pub short: String,
-    pub long: String,
-}
 
 #[derive(Debug)]
 pub struct SentenceRow {
@@ -35,13 +12,29 @@ pub struct SentenceRow {
     pub text: String,
 }
 
-#[derive(Debug)]
-pub struct WordFrontierMember {
-    pub sentences_rowid: i32,
-    pub lang_rowid: i32,
-    pub text: String,
-    pub unknown_word_count: i32,
-    pub unknown_word_freq: i32,
+impl SentenceRow {
+    pub fn from_tsv(tsv: &str, lang_rowid: i32) -> Result<Self> {
+        let mut tsv_split = tsv.split('\t');
+        match (
+            tsv_split.next(),
+            tsv_split.next(),
+            tsv_split.next(),
+            tsv_split.next(),
+        ) {
+            // We expect exactly 3 tab-separated strings (None indicates the end of strings)
+            (Some(sentences_rowid_str), Some(_lang_short), Some(text), None) => {
+                let sentences_rowid = str::parse::<i32>(sentences_rowid_str).or_else(
+                    |e| Err(anyhow::anyhow!(
+                        "Parse error {} in translations TSV data; expected integer rowid value, but got {:#?}",
+                        e,  sentences_rowid_str
+                    ))
+                )?;
+                Ok(SentenceRow { sentences_rowid, lang_rowid, text: text.into() })
+            },
+            // Anything else is an error.
+            _ => Err(anyhow::anyhow!("Malformed sentences TSV data {:#?}", tsv))?,
+        }
+    }
 }
 
 pub struct WordRow {
@@ -57,57 +50,12 @@ pub struct SentenceMembershipRow {
     pub word_rowid: i32,
 }
 
-pub struct SentenceMembershipWithTextEtc {
-    pub sentence_memberships_rowid: i32,
-    pub sentence_rowid: i32,
-    pub word_rowid: i32,
-    pub word_text: String,
-    pub word_freq: i32,
-    pub word_is_known: bool,
-}
-
-pub struct TranslationRow {
-    pub translations_rowid: i32,
-    pub target_lang_sentence_rowid: i32,
-    pub reference_lang_sentence_rowid: i32,
-}
-
-pub struct TranslationWithText {
-    pub translations_rowid: i32,
-    pub target_lang_sentence_rowid: i32,
-    pub reference_lang_sentence_rowid: i32,
-    pub reference_lang_sentence_text: String,
-}
-
 #[derive(Debug)]
 pub struct WordFrontierWithTranslation {
     pub target_lang_sentence_rowid: i32,
     pub target_lang_text: String,
     pub reference_lang_sentence_rowid: i32,
     pub reference_lang_text: String,
-}
-
-pub struct KnownWordRow {
-    pub known_words_rowid: i32,
-    pub word_rowid: i32,
-}
-
-pub struct KnownWordWithText {
-    pub known_words_rowid: i32,
-    pub word_rowid: i32,
-    pub word_text: String,
-}
-
-// TODO: Figure out how to make a derive macro for this.
-impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for LangRow {
-    type Error = rusqlite::Error;
-    fn try_from(row: &rusqlite::Row<'stmt>) -> std::result::Result<Self, Self::Error> {
-        Ok(LangRow {
-            langs_rowid: row.get(0)?,
-            short: row.get(1)?,
-            long: row.get(2)?,
-        })
-    }
 }
 
 impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for SentenceRow {
@@ -117,19 +65,6 @@ impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for SentenceRow {
             sentences_rowid: row.get(0)?,
             lang_rowid: row.get(1)?,
             text: row.get(2)?,
-        })
-    }
-}
-
-impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for WordFrontierMember {
-    type Error = rusqlite::Error;
-    fn try_from(row: &rusqlite::Row<'stmt>) -> std::result::Result<Self, Self::Error> {
-        Ok(WordFrontierMember {
-            sentences_rowid: row.get(0)?,
-            lang_rowid: row.get(1)?,
-            text: row.get(2)?,
-            unknown_word_count: row.get(3)?,
-            unknown_word_freq: row.get(4)?,
         })
     }
 }
@@ -157,43 +92,6 @@ impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for SentenceMembershipRow {
     }
 }
 
-impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for SentenceMembershipWithTextEtc {
-    type Error = rusqlite::Error;
-    fn try_from(row: &rusqlite::Row<'stmt>) -> std::result::Result<Self, Self::Error> {
-        Ok(SentenceMembershipWithTextEtc {
-            sentence_memberships_rowid: row.get(0)?,
-            sentence_rowid: row.get(1)?,
-            word_rowid: row.get(2)?,
-            word_text: row.get(3)?,
-            word_freq: row.get(4)?,
-            word_is_known: row.get(5)?,
-        })
-    }
-}
-
-impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for TranslationRow {
-    type Error = rusqlite::Error;
-    fn try_from(row: &rusqlite::Row<'stmt>) -> std::result::Result<Self, Self::Error> {
-        Ok(TranslationRow {
-            translations_rowid: row.get(0)?,
-            target_lang_sentence_rowid: row.get(1)?,
-            reference_lang_sentence_rowid: row.get(2)?,
-        })
-    }
-}
-
-impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for TranslationWithText {
-    type Error = rusqlite::Error;
-    fn try_from(row: &rusqlite::Row<'stmt>) -> std::result::Result<Self, Self::Error> {
-        Ok(TranslationWithText {
-            translations_rowid: row.get(0)?,
-            target_lang_sentence_rowid: row.get(1)?,
-            reference_lang_sentence_rowid: row.get(2)?,
-            reference_lang_sentence_text: row.get(3)?,
-        })
-    }
-}
-
 impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for WordFrontierWithTranslation {
     type Error = rusqlite::Error;
     fn try_from(row: &rusqlite::Row<'stmt>) -> std::result::Result<Self, Self::Error> {
@@ -206,66 +104,58 @@ impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for WordFrontierWithTranslation {
     }
 }
 
-impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for KnownWordRow {
-    type Error = rusqlite::Error;
-    fn try_from(row: &rusqlite::Row<'stmt>) -> std::result::Result<Self, Self::Error> {
-        Ok(KnownWordRow {
-            known_words_rowid: row.get(0)?,
-            word_rowid: row.get(1)?,
-        })
-    }
-}
-
-impl<'stmt> TryFrom<&rusqlite::Row<'stmt>> for KnownWordWithText {
-    type Error = rusqlite::Error;
-    fn try_from(row: &rusqlite::Row<'stmt>) -> std::result::Result<Self, Self::Error> {
-        Ok(KnownWordWithText {
-            known_words_rowid: row.get(0)?,
-            word_rowid: row.get(1)?,
-            word_text: row.get(2)?,
-        })
-    }
-}
-
-/// See https://www.sqlite.org/lang_conflict.html -- note that OnConflict::Fail is the
-/// default behavior if no "ON XXX" is specified in the INSERT SQL statement.
 #[derive(Debug, Clone, Copy)]
-pub enum OnConflict {
-    Abort,
-    Fail,
-    Ignore,
-    Replace,
-    Rollback,
+pub enum CorpusPurpose {
+    TargetLang,
+    ReferenceLang,
 }
 
-impl std::fmt::Display for OnConflict {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+impl CorpusPurpose {
+    pub fn database_name(self) -> &'static str {
         match self {
-            OnConflict::Abort => write!(f, "ABORT"),
-            OnConflict::Fail => write!(f, "FAIL"),
-            OnConflict::Ignore => write!(f, "IGNORE"),
-            OnConflict::Replace => write!(f, "REPLACE"),
-            OnConflict::Rollback => write!(f, "ROLLBACK"),
+            CorpusPurpose::TargetLang => "target_corpus_db",
+            CorpusPurpose::ReferenceLang => "reference_corpus_db",
         }
     }
 }
 
 pub struct CorpusDb {
+    lang_row: LangRow,
     conn: rusqlite::Connection,
 }
 
 impl CorpusDb {
-    pub fn open(db_p: impl AsRef<Path>) -> Result<CorpusDb> {
+    pub async fn create_and_populate_if_missing(lang_row: LangRow, override_base_url_o: Option<&str>) -> Result<()> {
+        let db_p = Self::db_path_from(&lang_row.short)?;
+        if !Path::new(&db_p).exists() {
+            Self::open(lang_row)?.populate(override_base_url_o).await?;
+        }
+        Ok(())
+    }
+    pub fn attach(conn: &rusqlite::Connection, lang_short: &str, corpus_purpose: CorpusPurpose) -> Result<()> {
+        let db_p = Self::db_path_from(lang_short)?;
+        conn.execute("ATTACH DATABASE ?1 AS ?2", rusqlite::params![db_p, corpus_purpose.database_name()])?;
+        Ok(())
+    }
+    pub fn db_path_from(lang_short: &str) -> Result<String> {
+        LANG_M.get(lang_short)
+            .ok_or_else(|| anyhow::anyhow!("lang_short {:#?} not found", lang_short))?;
+        Ok(format!("corpus.lang={}.db", lang_short))
+    }
+
+    pub fn open(lang_row: LangRow) -> Result<Self> {
+        let db_p = Self::db_path_from(&lang_row.short)?;
         let conn = rusqlite::Connection::open(db_p)?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS langs (
-                langs_rowid INTEGER PRIMARY KEY,
-                short TEXT UNIQUE NOT NULL,
-                long TEXT NOT NULL
-            )",
-            [],
-        )?;
-        conn.execute(
+        Ok(Self { lang_row, conn })
+    }
+    pub async fn populate(
+        &mut self,
+        override_base_url_o: Option<&str>,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+
+        // Create all the tables
+        tx.execute(
             "CREATE TABLE IF NOT EXISTS sentences (
                 sentences_rowid INTEGER PRIMARY KEY,
                 lang_rowid INTEGER NOT NULL,
@@ -273,7 +163,7 @@ impl CorpusDb {
             )",
             [],
         )?;
-        conn.execute(
+        tx.execute(
             "CREATE TABLE IF NOT EXISTS words (
                 words_rowid INTEGER PRIMARY KEY,
                 lang_rowid INTEGER NOT NULL,
@@ -283,7 +173,7 @@ impl CorpusDb {
             )",
             [],
         )?;
-        conn.execute(
+        tx.execute(
             "CREATE TABLE IF NOT EXISTS sentence_memberships (
                 sentence_memberships_rowid INTEGER PRIMARY KEY,
                 sentence_rowid INTEGER NOT NULL,
@@ -292,133 +182,44 @@ impl CorpusDb {
             )",
             [],
         )?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS translations (
-                translations_rowid INTEGER PRIMARY KEY,
-                target_lang_sentence_rowid INTEGER NOT NULL,
-                reference_lang_sentence_rowid INTEGER NOT NULL,
-                UNIQUE(target_lang_sentence_rowid, reference_lang_sentence_rowid)
-            )",
-            [],
-        )?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS known_words (
-                known_words_rowid INTEGER PRIMARY KEY,
-                word_rowid INTEGER NOT NULL,
-                UNIQUE(word_rowid)
-            )",
-            [],
-        )?;
-        Ok(CorpusDb { conn })
-    }
-    pub fn import_from_sentence_pairs_tsv(
-        &mut self,
-        target_lang: Lang,
-        reference_lang: Lang,
-        sentence_pairs_tsv_p: impl AsRef<Path>,
-        on_conflict: OnConflict,
-    ) -> Result<()> {
-        let tx = self.conn.transaction()?;
 
-        // Ensure target and reference Lang-s are inserted.  Always ignore conflicts.
-        {
-            let mut insert_lang_stmt = tx.prepare(
-                &format!("INSERT OR {} INTO langs (short, long) VALUES (?1, ?2)", OnConflict::Ignore)
-            )?;
-            insert_lang_stmt.execute(rusqlite::params![target_lang.short, target_lang.long])?;
-            insert_lang_stmt
-                .execute(rusqlite::params![reference_lang.short, reference_lang.long])?;
-        }
-        // Retrieve the target and reference lang rowid-s.
-        let target_lang_rowid = tx.query_row::<i32, _, _>(
-            "SELECT langs_rowid FROM langs WHERE short = (?1)",
-            rusqlite::params![target_lang.short],
-            |row| row.get(0),
-        )?;
-        let reference_lang_rowid = tx.query_row::<i32, _, _>(
-            "SELECT langs_rowid FROM langs WHERE short = (?1)",
-            rusqlite::params![reference_lang.short],
-            |row| row.get(0),
-        )?;
+        // Now download and ingest the content
 
-        // Read all sentences into memory.  This will help the processing time by using more memory.
-        // Although not anywhere close to a single Chrome browser tab...
-        // Also record all the translations during this pass, so no intermediate storage is needed.
+        let default_base_url = "https://downloads.tatoeba.org/exports/per_language";
+        let base_url = override_base_url_o.unwrap_or(default_base_url);
+
+        // TODO: Figure out how to do this in a streaming way
+        let sentences_tsv_string = {
+            let compressed_bytes =
+                reqwest::get(format!("{}/{}/{}_sentences.tsv.bz2", base_url, self.lang_row.short, self.lang_row.short))
+                .await?
+                // TODO: Streaming into bzip2 decompression
+                .bytes()
+                .await?;
+            let mut bz2_decoder = bzip2::bufread::BzDecoder::new(compressed_bytes.as_ref());
+            // TODO: Try to pre-allocate capacity
+            let mut sentences_tsv_string = String::new();
+            use std::io::Read;
+            bz2_decoder.read_to_string(&mut sentences_tsv_string)?;
+            sentences_tsv_string
+        };
+        let line_count = sentences_tsv_string.split('\n').count();
+        log::debug!("sentences TSV data had {} lines", line_count);
+
         let sentence_row_v = {
-            let mut insert_translation = tx.prepare(
-                &format!("INSERT OR {} INTO translations (target_lang_sentence_rowid, reference_lang_sentence_rowid) VALUES (?1, ?2)", on_conflict)
-            )?;
-
-            log::info!("importing from path {:?}", sentence_pairs_tsv_p.as_ref());
-            // First, determine the number of lines in the file.
-            let line_count =
-                std::io::BufReader::new(std::fs::File::open(sentence_pairs_tsv_p.as_ref())?)
-                    .lines()
-                    .count();
-            log::info!("file line_count is {}", line_count);
             // Allocate a sentence vector of the given capacity.
             let mut sentence_row_v = Vec::with_capacity(line_count);
             // Now iterate through the content itself.
-            for (line_index, tsv_line_r) in
-                std::io::BufReader::new(std::fs::File::open(sentence_pairs_tsv_p.as_ref())?)
-                    .lines()
-                    .enumerate()
-            {
+            for (line_index, sentence_tsv_line) in sentences_tsv_string.split('\n').enumerate() {
                 let line_number = line_index + 1;
-                let tsv_line = tsv_line_r?;
-                let tsv_line_v: Vec<&str> = tsv_line.split('\t').collect();
-                if tsv_line_v.len() != 4 {
-                    log::warn!(
-                        "parse error on line {}: expected 4 tab-separated values but found {}",
-                        line_number,
-                        tsv_line_v.len()
-                    );
-                    continue;
-                }
-
-                // Parse out the sentences in target and reference langs.
-                let target_lang_sentence_rowid = match i32::from_str(tsv_line_v[0]) {
-                    Ok(n) => n,
+                let sentence_row = match SentenceRow::from_tsv(sentence_tsv_line, self.lang_row.langs_rowid) {
+                    Ok(sentence_row) => sentence_row,
                     Err(e) => {
-                        log::warn!(
-                            "parse error in sentence_rowid {:?} on line {}; error was {}",
-                            tsv_line_v[0],
-                            line_number,
-                            e
-                        );
+                        log::warn!("On line {}, {}.  Ignoring this line.", line_number, e);
                         continue;
-                    }
+                    },
                 };
-                let target_lang_sentence_text = tsv_line_v[1];
-                let reference_lang_sentence_rowid = match i32::from_str(tsv_line_v[2]) {
-                    Ok(n) => n,
-                    Err(e) => {
-                        log::warn!(
-                            "parse error in sentence_rowid {:?} on line {}; error was {}",
-                            tsv_line_v[2],
-                            line_number,
-                            e
-                        );
-                        continue;
-                    }
-                };
-                let reference_lang_sentence_text = tsv_line_v[3];
-                // Store the sentences.
-                sentence_row_v.push(SentenceRow {
-                    sentences_rowid: target_lang_sentence_rowid,
-                    lang_rowid: target_lang_rowid,
-                    text: target_lang_sentence_text.into(),
-                });
-                sentence_row_v.push(SentenceRow {
-                    sentences_rowid: reference_lang_sentence_rowid,
-                    lang_rowid: reference_lang_rowid,
-                    text: reference_lang_sentence_text.into(),
-                });
-                // Record the translation.
-                insert_translation.execute(rusqlite::params![
-                    target_lang_sentence_rowid,
-                    reference_lang_sentence_rowid
-                ])?;
+                sentence_row_v.push(sentence_row);
             }
 
             sentence_row_v
@@ -438,7 +239,7 @@ impl CorpusDb {
                 // Now also parse the sentence and gather words.
                 for word_str in sentence_row.text.split_whitespace() {
                     // Clean punctuation off of the word.
-                    let trim_pattern: &[char] = &['.', ',', '!', '?', '"', '\''];
+                    let trim_pattern: &[char] = &['.', ',', '!', '¡', '?', '¿', '"', '\''];
                     let word_str = word_str
                         .trim_start_matches(trim_pattern)
                         .trim_end_matches(trim_pattern);
@@ -473,6 +274,8 @@ impl CorpusDb {
                 sentence_membership_sm.insert(sentence_row.sentences_rowid, sentence_words_rowid_s);
             }
         }
+
+        let on_conflict = OnConflict::Ignore;
 
         // Insert sentences
         {
@@ -522,168 +325,5 @@ impl CorpusDb {
         tx.commit()?;
 
         Ok(())
-    }
-    // TODO: Maybe make one that optionally takes a transaction, in order to reduce duplication.
-    pub fn langs_rowid_of(&self, lang_short: impl AsRef<str>) -> Result<i32> {
-        Ok(self.conn.query_row::<i32, _, _>(
-            "SELECT langs_rowid FROM langs WHERE short = (?1)",
-            rusqlite::params![lang_short.as_ref()],
-            |row| row.get(0),
-        )?)
-    }
-    pub fn query_translation_with_text_v(
-        &self,
-        target_lang_sentence_rowid: i32,
-    ) -> Result<Vec<TranslationWithText>> {
-        let mut stmt = self.conn.prepare("
-            -- Human-friendly query of translations
-            SELECT translations.translations_rowid, translations.target_lang_sentence_rowid, translations.reference_lang_sentence_rowid, sentences.text
-            FROM translations
-            INNER JOIN sentences ON sentences.sentences_rowid = translations.reference_lang_sentence_rowid
-            WHERE translations.target_lang_sentence_rowid = ?1
-        ")?;
-        let translation_with_text_v = stmt
-            .query_map(
-                rusqlite::params![target_lang_sentence_rowid],
-                |row| TranslationWithText::try_from(row),
-            )?
-            .map(|translation_with_text_r| translation_with_text_r.unwrap())
-            .collect();
-        Ok(translation_with_text_v)
-    }
-    pub fn query_sentence_membership_with_text_etc_v(
-        &self,
-        sentence_rowid: i32,
-    ) -> Result<Vec<SentenceMembershipWithTextEtc>> {
-        let mut stmt = self.conn.prepare("
-            -- Human-friendly query of sentence_memberships
-            SELECT
-                sentence_memberships.sentence_memberships_rowid,
-                sentence_memberships.sentence_rowid,
-                sentence_memberships.word_rowid,
-                words.text,
-                words.freq,
-                (sentence_memberships.word_rowid IN (SELECT known_words.word_rowid FROM known_words)) AS word_is_known
-            FROM sentence_memberships
-            INNER JOIN words ON words.words_rowid = sentence_memberships.word_rowid
-            WHERE sentence_memberships.sentence_rowid = ?1
-            ORDER BY word_is_known ASC
-        ")?;
-        let sentence_membership_with_text_etc_v = stmt
-            .query_map(
-                rusqlite::params![sentence_rowid],
-                |row| SentenceMembershipWithTextEtc::try_from(row),
-            )?
-            .map(|sentence_membership_with_text_etc_r| sentence_membership_with_text_etc_r.unwrap())
-            .collect();
-        Ok(sentence_membership_with_text_etc_v)
-    }
-    pub fn query_known_word_with_text_v(
-        &self,
-        target_lang_rowid: i32,
-    ) -> Result<Vec<KnownWordWithText>> {
-        let mut stmt = self.conn.prepare("
-            -- Human-friendly query of known words
-            SELECT known_words.known_words_rowid, known_words.word_rowid, words.text
-            FROM known_words
-            INNER JOIN words ON words.words_rowid = known_words.word_rowid
-            WHERE words.lang_rowid = ?1
-        ")?;
-        let known_word_with_text_v = stmt
-            .query_map(
-                rusqlite::params![target_lang_rowid],
-                |row| KnownWordWithText::try_from(row),
-            )?
-            .map(|known_word_with_text_r| known_word_with_text_r.unwrap())
-            .collect();
-        Ok(known_word_with_text_v)
-    }
-    pub fn add_known_word(
-        &self,
-        word_rowid: i32,
-    ) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO known_words (word_rowid) VALUES (?1) ON CONFLICT(word_rowid) DO NOTHING",
-            [word_rowid],
-        )?;
-        Ok(())
-    }
-    pub fn remove_known_word(
-        &self,
-        word_rowid: i32,
-    ) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM known_words WHERE word_rowid = ?1",
-            [word_rowid],
-        )?;
-        Ok(())
-    }
-    pub fn query_word_frontier_v(
-        &self,
-        known_word_count_range: Range,
-        target_lang_rowid: i32,
-        order: Order,
-    ) -> Result<Vec<WordFrontierMember>> {
-        let ordering_str = match order {
-            Order::Ascending => "ORDER BY unknown_word_freq ASC",
-            Order::Descending => "ORDER BY unknown_word_freq DESC",
-            Order::Unordered => "",
-        };
-        let mut stmt = self.conn.prepare(&format!("
-            -- This selects sentence_rowid for sentences having a number of unknown words in a certain range.
-            SELECT
-                sentences.sentences_rowid,
-                sentences.lang_rowid,
-                sentences.text,
-                (
-                    SELECT COUNT(*)
-                    FROM sentence_memberships
-                    WHERE
-                        sentence_memberships.sentence_rowid = sentences.sentences_rowid
-                        AND
-                        sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
-                    GROUP BY sentence_memberships.sentence_rowid
-                    ORDER BY sentence_memberships.sentence_rowid
-                ),
-                (
-                    SELECT MIN(words.freq)
-                    FROM sentence_memberships
-                    INNER JOIN words ON words.words_rowid = sentence_memberships.word_rowid
-                    WHERE
-                        sentence_memberships.sentence_rowid = sentences.sentences_rowid
-                        AND
-                        sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
-                    GROUP BY sentence_memberships.sentence_rowid
-                    ORDER BY sentence_memberships.sentence_rowid
-                ) as unknown_word_freq
-            FROM sentences
-            WHERE
-                (
-                    SELECT COUNT(*)
-                    FROM sentence_memberships
-                    WHERE
-                        sentence_memberships.sentence_rowid = sentences.sentences_rowid
-                        AND
-                        sentence_memberships.word_rowid NOT IN (SELECT known_words.word_rowid FROM known_words)
-                    GROUP BY sentence_memberships.sentence_rowid
-                    ORDER BY sentence_memberships.sentence_rowid
-                ) BETWEEN ?1 AND ?2
-                AND
-                sentences.lang_rowid = ?3
-            -- GROUP BY sentences.sentences_rowid
-            {}
-        ", ordering_str))?;
-        let word_frontier_member_v = stmt
-            .query_map(
-                rusqlite::params![
-                    known_word_count_range.0,
-                    known_word_count_range.1,
-                    target_lang_rowid
-                ],
-                |row| WordFrontierMember::try_from(row),
-            )?
-            .map(|word_frontier_member_r| word_frontier_member_r.unwrap())
-            .collect();
-        Ok(word_frontier_member_v)
     }
 }

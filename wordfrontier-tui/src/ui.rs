@@ -129,6 +129,7 @@ where
                 .map(|word_frontier_member| {
 //                     ListItem::new(vec![Spans::from(Span::raw(&word_frontier_member.text))])
                     ListItem::new(vec![Spans::from(Span::raw(format!("{} : {}", word_frontier_member.text, word_frontier_member.unknown_word_count)))])
+//                     ListItem::new(vec![Spans::from(Span::raw(format!("{} : {} : (sentences_rowid: {})", word_frontier_member.text, word_frontier_member.unknown_word_count, word_frontier_member.sentences_rowid)))])
                 })
                 .collect();
         let word_frontier_size = word_frontier_list_item_v.len();

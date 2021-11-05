@@ -45,18 +45,50 @@ Text User Interface for `wordfrontier`.
 
 ## To-dos
 
--   Implement frequency-ordering of word frontier list.
 -   Instead of having a separate panel for "Sentence Words", highlight the words in the "Word Frontier"
     panel itself, using different colors based on their being in the known_words table or not, and give the
     ability to add/remove words from that panel.  Use a background color to indicate the selected word,
     and use foreground colors to indicate level of knowledge.  N-grams could also be selected by expanding
     the background color left and right to encompass the N-gram, though this is a more ill-defined thing.
--   Make it so that re-computing the word frontier requires an explicit action.  This is so that there is
-    continuity in the content as the user is reviewing words and adding/removing them from known_words.
 -   Add a command to add all words in a sentence to the known_words table.
 -   Generate n-grams (2, 3, and maybe 4), analyze the frequency, and select some significant top portion
     of them, as these could/should represent common sentence fragments.  Make n-grams a "knowable" primitive,
     so those are an object of learning too.
+-   Eventually allow updating the corpus DB from updates on tatoeba.org (ideally this could query only for
+    recently added content).
+-   Use a static configuration to specify the following:
+    -   Active target language (via short name, e.g. "eng" or "deu")
+    -   Reference language (also via short name)
+    -   Word frontier parameters
+        -   Min unknown word count
+        -   Max unknown word count
+    -   DB directory (storage location for DBs)
+    -   Downloads directory (for downloading content from tatoeba.org) -- could default to temp dir.
+-   Maybe instead of having multiple tabs for sentence learning and word learning, have the main tab have
+    the following panels:
+    1.  Word Frontier
+    2.  Words in selected sentence in panel 1
+        Maybe split this vertically into panels:
+        -   Words in selected sentence
+        -   Known words
+    3.  Sentences containing the selected word in panel 2
+-   From a given word frontier, extract the top 50 (or whatever number) of unknown words (since they're
+    ordered based on frequency) as the next list of words to learn.
+
+## To-don'ts (i.e. Done)
+
+-   Implement frequency-ordering of word frontier list.
+-   Make it so that re-computing the word frontier requires an explicit action.  This is so that there is
+    continuity in the content as the user is reviewing words and adding/removing them from known_words.
+-   Create a tool to ingest content from tatoeba.org and insert it into the DB.  For now, just ingest
+    a single language's sentences into a single DB, named using the short name of the lang.  Similarly,
+    for a pair of languages (abc, xyz), ingest translations between them into a single DB, named using
+    both langs' short names (in alphabetical order).
+-   Integrate the tatoeba.org content ingestion into the TUI app itself.
+-   Implement SQLite DB attachment, to keep the user's data (i.e. known_words table, and potientially
+    other stuff later) separate from the corpus DB.  Theoretically there could be a system-global corpus
+    DB that all users of a system have access to, and then each of them keeps only their user-specific
+    data (e.g. known_words table) in their own local DB.
 
 ## License and Attributions
 
